@@ -1,8 +1,10 @@
 use kinode_process_lib::http;
-use kinode_process_lib::kernel_types::{PythonRequest, PythonResponse};
+use kinode_process_lib::kernel_types::MessageType;
 use kinode_process_lib::{
-    await_message, call_init, get_blob, mutate_blob_for_ext_ws, println, Address, LazyLoadBlob, Message, MessageType, Request, Response,
+    await_message, call_init, get_blob, println, Address, LazyLoadBlob, Message, Request, Response,
 };
+
+mod ml_types;
 
 wit_bindgen::generate!({
     path: "wit",
@@ -58,7 +60,7 @@ fn handle_ws_message(
                         return Err(anyhow::anyhow!("foo"));
                     };
                     Response::new()
-                        .body(serde_json::to_vec(&PythonResponse::Run)?)
+                        .body(serde_json::to_vec(&serde_json::json!("Run"))?)
                         .blob(LazyLoadBlob {
                             mime: None,
                             bytes,
@@ -82,18 +84,19 @@ fn handle_message(
         return Ok(());
     };
 
-    if let Ok(PythonRequest::Run) = serde_json::from_slice(message.body()) {
+    if serde_json::json!("Run") != serde_json::from_slice::<serde_json::Value>(message.body())? {
+        handle_ws_message(connection, message)?;
+    } else {
         let Some(Connection { channel_id }) = connection else {
             panic!("");
         };
 
-        mutate_blob_for_ext_ws(MessageType::Response);
-
         Request::new()
             .target("our@http_server:distro:sys".parse::<Address>()?)
-            .body(serde_json::to_vec(&http::HttpServerRequest::WebSocketPush {
+            .body(serde_json::to_vec(&http::HttpServerAction::WebSocketExtPushOutgoing {
                 channel_id: *channel_id,
                 message_type: http::WsMessageType::Binary,
+                desired_reply_type: MessageType::Response,
             })?)
             .expects_response(15)
             .inherit(true)
@@ -102,8 +105,6 @@ fn handle_message(
         let Ok(message) = await_message() else {
             return Ok(());
         };
-        handle_ws_message(connection, message)?;
-    } else {
         handle_ws_message(connection, message)?;
     }
 
@@ -116,7 +117,7 @@ fn init(our: Address) {
 
     let mut connection: Option<Connection> = None;
 
-    http::bind_ws_path("/", false, false, true).unwrap();
+    http::bind_ext_path("/").unwrap();
 
     loop {
         match handle_message(&mut connection) {
