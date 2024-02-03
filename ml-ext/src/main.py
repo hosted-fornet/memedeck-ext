@@ -38,20 +38,21 @@ def bytes_to_tensors_torch(bytes_data, single_tensor_shape, dtype=torch.float32)
 # # Now, `tensors` is a list of tensors, each ready to be fed into your PyTorch model
 
 
-def bytes_to_tensors_tf(bytes_data, single_tensor_shape, dtype=tf.float32):
-    element_size = np.dtype(dtype.as_numpy_dtype).itemsize
-    tensor_size = np.prod(single_tensor_shape) * element_size
-    num_tensors = len(bytes_data) // tensor_size
-
-    tensors = []
-    for i in range(num_tensors):
-        start = i * tensor_size
-        end = start + tensor_size
-        tensor_data = np.frombuffer(bytes_data[start:end], dtype=dtype.as_numpy_dtype)
-        tensor = tf.convert_to_tensor(tensor_data).reshape(single_tensor_shape)
-        tensors.append(tensor)
-
-    return tensors
+#def bytes_to_tensors_tf(bytes_data, single_tensor_shape, dtype=tf.float32):
+#    print(bytes_data, single_tensor_shape, dtype)
+#    element_size = np.dtype(dtype.as_numpy_dtype).itemsize
+#    tensor_size = np.prod(single_tensor_shape) * element_size
+#    num_tensors = len(bytes_data) // tensor_size
+#
+#    tensors = []
+#    for i in range(num_tensors):
+#        start = i * tensor_size
+#        end = start + tensor_size
+#        tensor_data = np.frombuffer(bytes_data[start:end], dtype=dtype.as_numpy_dtype)
+#        tensor = tf.convert_to_tensor(tensor_data).reshape(single_tensor_shape)
+#        tensors.append(tensor)
+#
+#    return tensors
 
 # # Example usage
 # bytes_data = ...  # your bytes data from WebSocket
@@ -156,6 +157,7 @@ def evaluate_model_tf(model, input_list):
     :param input_list: List of inputs to evaluate. Each input should be a tensor or a compatible type.
     :return: List of model outputs.
     """
+    #print(f"input_list\n{input_list}")
     outputs = []
     for input_tensor in input_list:
         output = model(input_tensor)
@@ -231,19 +233,18 @@ REVERSE_KINODE_ML_DATA_TYPE_TO_NUMPY_MAP = {v: k for k, v in KINODE_ML_DATA_TYPE
 def deserialize_kinode_ml_request(encoded_blob):
     """Deserialize the blob into KinodeMlRequest structure."""
     blob = msgpack.unpackb(bytes(encoded_blob), raw=False)
-    print(f"{blob}")
     blob['data_bytes'] = deserialize_tensor_data_tf(
         blob['data_bytes'],
         blob['data_shape'],
         blob['data_type'],
     )
+    #print(blob['data_bytes'].shape)
     return blob
 
 
 def deserialize_message(encoded_message):
     """Deserialize MessagePack-encoded KinodeExtWSMessage to a Python dictionary."""
     message = msgpack.unpackb(encoded_message, raw=False)
-    #print(f"{message}")
     message = message["WebSocketExtPushData"]
     message["blob"] = deserialize_kinode_ml_request(message["blob"])
     return message
@@ -260,43 +261,75 @@ def serialize_kinode_ml_response(library, data_tensor):
     else:
         pass
     request = {
-        "library": REVERSE_KINODE_ML_LIBRARY_MAP[library],
+        "library": library,
         "data_shape": data_shape,
         "data_type": data_type,
         "data_bytes": data_bytes,
     }
-    return msgpack.packb(request, use_bin_type=True)
+    return list(msgpack.packb(request, use_bin_type=True))
 
 
 def serialize_message(id, message_type, library, data_tensor):
     """Serialize data to MessagePack format."""
     message = {
-        "id": id,
-        "kinode_message_type": message_type,
-        "blob": serialize_kinode_ml_response(library, data_tensor),
+        "WebSocketExtPushData": {
+            "id": id,
+            "kinode_message_type": message_type,
+            "blob": serialize_kinode_ml_response(library, data_tensor),
+        }
     }
     return msgpack.packb(message, use_bin_type=True)
 
-def serialize_tensor_data_tf(tensor):
-    # Ensure tensor is in CPU memory and convert to desired dtype
-    dtype = REVERSE_KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[tensor[0].dtype]
-    shape = tensor[0].shape
+def serialize_tensor_data_tf(tensors):
+    dtype = REVERSE_KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[tensors[0].dtype]
+    # Ensure all tensors are on CPU memory
+    tensors = [tensor.numpy() for tensor in tensors]
+
+    # Check if tensors list is not empty and retrieve the dtype and shape from the first tensor
+    if not tensors:
+        raise ValueError("Tensors list must not be empty")
+
+    shape = tensors[0].shape
     np_dtype = KINODE_ML_DATA_TYPE_TO_NUMPY_MAP[dtype]
-    tensor = tensor.numpy().astype(np_dtype)
-    # Flatten the tensor and convert to bytes
-    return shape, dtype, tensor.tobytes()
+
+    # Convert each tensor to the desired numpy dtype and flatten
+    flattened_arrays = [tensor.astype(np_dtype).ravel() for tensor in tensors]
+
+    # Concatenate all numpy arrays into one
+    concatenated_array = np.concatenate(flattened_arrays)
+
+    # Convert the concatenated array to bytes
+    bytes_data = list(concatenated_array.tobytes())
+
+    return shape, dtype, bytes_data
 
 def deserialize_tensor_data_tf(bytes_list, shape, dtype):
-    # Convert bytes to numpy array
+    # Determine the numpy and TensorFlow data types from the mappings
     np_dtype = KINODE_ML_DATA_TYPE_TO_NUMPY_MAP[dtype]
     tf_dtype = KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[dtype]
-    array = np.frombuffer(bytes(bytes_list), dtype=np_dtype).reshape(shape)
-    # Convert numpy array to TensorFlow tensor
-    return tf.convert_to_tensor(array, dtype=tf_dtype)
+
+    # Calculate the size of a single tensor's data in bytes
+    single_tensor_byte_size = np.product(shape) * np.dtype(np_dtype).itemsize
+
+    # Ensure the byte_list is divisible by the size of a single tensor
+    if len(bytes_list) % single_tensor_byte_size != 0:
+        raise ValueError("byte_list size is not a multiple of shape product and dtype size")
+
+    # Calculate how many tensors are represented by the byte_list
+    num_tensors = len(bytes_list) // single_tensor_byte_size
+
+    # Convert the entire bytes_list to a numpy array first
+    full_array = np.frombuffer(bytes(bytes_list), dtype=np_dtype)
+
+    # Split the array into multiple arrays, each representing a tensor, and convert each to a TensorFlow tensor
+    tensors = [tf.convert_to_tensor(full_array[i * np.product(shape):(i + 1) * np.product(shape)].reshape(shape), dtype=tf_dtype)
+               for i in range(num_tensors)]
+
+    return tensors
 
 async def run(port, process="ml:ml:sys"):
     uri = f"ws://localhost:{port}/{process}"
-    async with websockets.connect(uri) as websocket:
+    async with websockets.connect(uri, ping_interval=None) as websocket:
         while True:
             message = await websocket.recv()
             message = deserialize_message(message)
@@ -324,27 +357,33 @@ async def run(port, process="ml:ml:sys"):
                 model = load_model_from_bytes_keras(request["model_bytes"])
                 # load data
                 dtype = KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[request["data_type"]]
-                data = bytes_to_tensors_tf(
-                    request["data_bytes"],
-                    request["data_shape"],
-                    dtype=dtype,
-                )
+                #data = bytes_to_tensors_tf(
+                #    request["data_bytes"],
+                #    request["data_shape"],
+                #    dtype=dtype,
+                #)
                 # evaluate model
-                outputs = evaluate_model_tf(model, data)
+                outputs = evaluate_model_tf(model, request["data_bytes"])
                 # serialize response
-                serialize_message(message["id"], message["kinode_message_type"], request["library"], outputs)
+                print(message["kinode_message_type"])
+                response = serialize_message(
+                    message["id"],
+                    message["kinode_message_type"],
+                    request["library"],
+                    outputs,
+                )
             elif request["library"] == "TensorFlow":
                 # load model
                 model = load_model_from_bytes_tf(request["model_bytes"])
                 # load data
                 dtype = KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[request["data_type"]]
-                data = bytes_to_tensors_tf(
-                    request["data_bytes"],
-                    request["data_shape"],
-                    dtype=dtype,
-                )
+                #data = bytes_to_tensors_tf(
+                #    request["data_bytes"],
+                #    request["data_shape"],
+                #    dtype=dtype,
+                #)
                 # evaluate model
-                outputs = evaluate_model_tf(model, data)
+                outputs = evaluate_model_tf(model, request["data_bytes"])
                 # serialize response
                 pass
             else:
@@ -352,6 +391,8 @@ async def run(port, process="ml:ml:sys"):
                 print(f"Don't recognize library {request['library']}; try PyTorch or TensorFlow")
                 # send error over ws
                 pass
+
+            await websocket.send(response)
 
 
 def main():

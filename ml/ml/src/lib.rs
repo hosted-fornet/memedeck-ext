@@ -55,17 +55,20 @@ fn handle_ws_message(
             }
             match message_type {
                 http::WsMessageType::Binary => {
-                    let Some(LazyLoadBlob { bytes, .. }) = get_blob() else {
-                        // TODO: response?
-                        return Err(anyhow::anyhow!("foo"));
-                    };
                     Response::new()
                         .body(serde_json::to_vec(&serde_json::json!("Run"))?)
-                        .blob(LazyLoadBlob {
-                            mime: None,
-                            bytes,
-                        })
+                        .inherit(true)
                         .send()?;
+                }
+                http::WsMessageType::Ping => {
+                    let _ = Request::new()
+                        .target("our@http_server:distro:sys".parse::<Address>()?)
+                        .body(serde_json::to_vec(&http::HttpServerAction::WebSocketPush {
+                            channel_id: *channel_id,
+                            message_type: http::WsMessageType::Pong,
+                        })?)
+                        .inherit(true)
+                        .send_and_await_response(5)?;
                 }
                 _ => {
                     // TODO: response; handle other types?
@@ -101,11 +104,6 @@ fn handle_message(
             .expects_response(15)
             .inherit(true)
             .send()?;
-
-        let Ok(message) = await_message() else {
-            return Ok(());
-        };
-        handle_ws_message(connection, message)?;
     }
 
     Ok(())
