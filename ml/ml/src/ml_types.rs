@@ -4,6 +4,7 @@ use serde::{Serialize, Deserialize};
 pub enum KinodeMlLibrary {
     PyTorch,
     TensorFlow,
+    Keras,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
