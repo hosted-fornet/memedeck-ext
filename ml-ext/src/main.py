@@ -233,12 +233,6 @@ REVERSE_KINODE_ML_DATA_TYPE_TO_NUMPY_MAP = {v: k for k, v in KINODE_ML_DATA_TYPE
 def deserialize_kinode_ml_request(encoded_blob):
     """Deserialize the blob into KinodeMlRequest structure."""
     blob = msgpack.unpackb(bytes(encoded_blob), raw=False)
-    blob['data_bytes'] = deserialize_tensor_data_tf(
-        blob['data_bytes'],
-        blob['data_shape'],
-        blob['data_type'],
-    )
-    #print(blob['data_bytes'].shape)
     return blob
 
 
@@ -357,6 +351,11 @@ async def run(port, process="ml:ml:sys"):
                 model = load_model_from_bytes_keras(request["model_bytes"])
                 # load data
                 dtype = KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[request["data_type"]]
+                request['data_bytes'] = deserialize_tensor_data_tf(
+                    request['data_bytes'],
+                    request['data_shape'],
+                    request['data_type'],
+                )
                 #data = bytes_to_tensors_tf(
                 #    request["data_bytes"],
                 #    request["data_shape"],
