@@ -8,7 +8,7 @@ ORDER MATTERS
 
 ml process MUST be started before ml-ext
 
-```
+```bash
 # Terminal 1: run Kinode
 # Use `develop` branch of Kinode
 kit f -r ~/path/to/kinode
@@ -17,9 +17,14 @@ kit f -r ~/path/to/kinode
 kit bs ml
 
 # Terminal 3: build & start python-ext
-cd python-ext
-cargo run --release -- --port 8080
+./ml-ext/src/main.py --port 8080
 
 # Run a model
 # TODO
+```
+
+If needed, Python dependencies can be fetched using
+
+```bash
+./ml-ext/setup.py
 ```
