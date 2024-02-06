@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 import argparse
+from datetime import datetime
 import io
 import json
+import logging
 import os
 import tempfile
 
@@ -135,6 +137,7 @@ def load_model_keras(model, models):
     """
     model_bytes = model.get("Bytes")
     if model_bytes is not None:
+        logging.debug(f"Loading Keras model from bytes (length {len(model_bytes)})...")
         # Create a temporary directory to write the model bytes
         temp_dir = tempfile.mkdtemp()
         model_path = os.path.join(temp_dir, 'saved_model')
@@ -148,15 +151,19 @@ def load_model_keras(model, models):
 
         # Cleanup the temporary directory if needed
         # shutil.rmtree(temp_dir)
+        logging.debug("Done loading Keras model from bytes")
 
         return model
 
     model_name = model.get("Name")
     if model_name is not None:
+        logging.debug(f"Loading Keras model from name ({model_name})...")
         model_path = models.get(model_name)
+        logging.debug(f"Found model name {model_name} at path {model_path}...")
         if model_path is None:
             raise Exception(f"no such model {model_name} amongst {models}")
         model = tf.keras.saving.load_model(model_path)
+        logging.debug(f"Done loading Keras model from name ({model_name})")
 
         return model
 
@@ -171,11 +178,12 @@ def evaluate_model_tf(model, input_list):
     :param input_list: List of inputs to evaluate. Each input should be a tensor or a compatible type.
     :return: List of model outputs.
     """
-    #print(f"input_list\n{input_list}")
+    logging.debug(f"Evaluating TF model on {len(input_list)} tensors...")
     outputs = []
     for input_tensor in input_list:
         output = model(input_tensor)
         outputs.append(output)
+    logging.debug(f"Done evaluating TF model on {len(input_list)} tensors")
     return outputs
 
 # # Assume `model_bytes` is your TensorFlow SavedModel in bytes form
@@ -308,6 +316,7 @@ def serialize_tensor_data_tf(tensors):
 
 
 def deserialize_tensor_data_tf(bytes_list, shape, dtype):
+    logging.debug("Deserializing TF data...")
     # Determine the numpy and TensorFlow data types from the mappings
     np_dtype = KINODE_ML_DATA_TYPE_TO_NUMPY_MAP[dtype]
     tf_dtype = KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[dtype]
@@ -329,6 +338,7 @@ def deserialize_tensor_data_tf(bytes_list, shape, dtype):
     tensors = [tf.convert_to_tensor(full_array[i * np.prod(shape):(i + 1) * np.prod(shape)].reshape(shape), dtype=tf_dtype)
                for i in range(num_tensors)]
 
+    logging.debug("Done deserializing TF data")
     return tensors
 
 
@@ -336,73 +346,91 @@ async def run(port, models, process="ml:ml:sys"):
     uri = f"ws://localhost:{port}/{process}"
     async with websockets.connect(uri, ping_interval=None, max_size=100 * 1024 * 1024) as websocket:
         while True:
-            message = await websocket.recv()
-            message = deserialize_message(message)
-            print(f"Got message with id {message['id']}")
-            request = message["blob"]
+            try:
+                message = await websocket.recv()
+                message = deserialize_message(message)
+                logging.info(f"Got message with id {message['id']}")
+                request = message["blob"]
 
-            if request["library"] == "PyTorch":
-                print("TODO")
-                pass
-                # # load model
-                # model = load_model_from_bytes_torch(request["model_bytes"])
-                # # load data
-                # dtype = KINODE_ML_DATA_TYPE_TO_PYTORCH_MAP[request["data_type"]]
-                # data = bytes_to_tensors_torch(
-                #     request["data_bytes"],
-                #     request["data_shape"],
-                #     dtype=dtype,
-                # )
-                # # evaluate model
-                # outputs = evaluate_model_torch(model, data)
-                # # serialize response
-                # pass
-            elif request["library"] == "Keras":
-                # load model
-                model = load_model_keras(request["model"], models)
-                # load data
-                dtype = KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[request["data_type"]]
-                request['data_bytes'] = deserialize_tensor_data_tf(
-                    request['data_bytes'],
-                    request['data_shape'],
-                    request['data_type'],
-                )
-                #data = bytes_to_tensors_tf(
-                #    request["data_bytes"],
-                #    request["data_shape"],
-                #    dtype=dtype,
-                #)
-                # evaluate model
-                outputs = evaluate_model_tf(model, request["data_bytes"])
-                # serialize response
-                print(message["kinode_message_type"])
-                response = serialize_message(
-                    message["id"],
-                    message["kinode_message_type"],
-                    request["library"],
-                    outputs,
-                )
-            elif request["library"] == "TensorFlow":
-                # load model
-                model = load_model_from_bytes_tf(request["model_bytes"])
-                # load data
-                dtype = KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[request["data_type"]]
-                #data = bytes_to_tensors_tf(
-                #    request["data_bytes"],
-                #    request["data_shape"],
-                #    dtype=dtype,
-                #)
-                # evaluate model
-                outputs = evaluate_model_tf(model, request["data_bytes"])
-                # serialize response
-                pass
-            else:
-                # print error
-                print(f"Don't recognize library {request['library']}; try PyTorch or TensorFlow")
-                # send error over ws
-                pass
+                if request["library"] == "PyTorch":
+                    logging.error("TODO")
+                    pass
+                    # # load model
+                    # model = load_model_from_bytes_torch(request["model_bytes"])
+                    # # load data
+                    # dtype = KINODE_ML_DATA_TYPE_TO_PYTORCH_MAP[request["data_type"]]
+                    # data = bytes_to_tensors_torch(
+                    #     request["data_bytes"],
+                    #     request["data_shape"],
+                    #     dtype=dtype,
+                    # )
+                    # # evaluate model
+                    # outputs = evaluate_model_torch(model, data)
+                    # # serialize response
+                    # pass
+                elif request["library"] == "Keras":
+                    # load model
+                    try:
+                        model = load_model_keras(request["model"], models)
+                    except Exception as e:
+                        logging.error(f"Failed to load Keras model: {e}")
+                        continue
 
-            await websocket.send(response)
+                    # load data
+                    dtype = KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[request["data_type"]]
+                    request['data_bytes'] = deserialize_tensor_data_tf(
+                        request['data_bytes'],
+                        request['data_shape'],
+                        request['data_type'],
+                    )
+
+                    # evaluate model
+                    outputs = evaluate_model_tf(model, request["data_bytes"])
+
+                    # serialize response
+                    logging.debug(f"Sending back Kinode Message of type {message['kinode_message_type']}")
+                    response = serialize_message(
+                        message["id"],
+                        message["kinode_message_type"],
+                        request["library"],
+                        outputs,
+                    )
+                elif request["library"] == "TensorFlow":
+                    # load model
+                    model = load_model_from_bytes_tf(request["model_bytes"])
+
+                    # load data
+                    dtype = KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[request["data_type"]]
+                    try:
+                        request['data_bytes'] = deserialize_tensor_data_tf(
+                            request['data_bytes'],
+                            request['data_shape'],
+                            request['data_type'],
+                        )
+                    except ValueError as e:
+                        logging.error(f"Failed to deserialize TF tensor: {e}")
+                        continue
+
+
+                    # evaluate model
+                    outputs = evaluate_model_tf(model, request["data_bytes"])
+
+                    # serialize response
+                    response = serialize_message(
+                        message["id"],
+                        message["kinode_message_type"],
+                        request["library"],
+                        outputs,
+                    )
+                else:
+                    # print error
+                    logging.error(f"Don't recognize library {request['library']}; try PyTorch or TensorFlow")
+                    # send error over ws
+                    pass
+
+                await websocket.send(response)
+            except Exception as e:
+                logging.error(f"Unexpected error: {e}")
 
 
 def validate_paths(paths_dict):
@@ -414,8 +442,36 @@ def validate_paths(paths_dict):
 
     if invalid_paths:
         for name, path in invalid_paths:
-            print(f"Error: The path for '{name}' does not exist: {path}")
+            logging.error(f"Error: The path for '{name}' does not exist: {path}")
         exit(1)
+    logging.debug("Given paths successfully validated")
+
+
+def setup_logging(console_level, file_level):
+    """
+    Configures logging to both the terminal and a file with different levels and formats.
+    """
+    console_level = getattr(logging, console_level.upper())
+    file_level = getattr(logging, file_level.upper())
+
+    # Create a logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)  # Set to DEBUG to capture all levels of messages
+
+    # Create console handler and set level to console_level
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(console_level)
+    console_formatter = logging.Formatter('%(levelname)s - %(message)s')
+    console_handler.setFormatter(console_formatter)
+    logger.addHandler(console_handler)
+
+    # Create file handler and set level to file_level
+    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    file_handler = logging.FileHandler(f"{date_str}-ml-ext.log")
+    file_handler.setLevel(file_level)
+    file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(file_formatter)
+    logger.addHandler(file_handler)
 
 
 def main():
@@ -434,7 +490,19 @@ def main():
         help="JSON string with name and path pairs",
         required=False,
     )
+    parser.add_argument(
+        '--console-log',
+        default='INFO',
+        help='Set the logging level for the console (DEBUG, INFO, WARNING, ERROR, CRITICAL)',
+    )
+    parser.add_argument(
+        '--file-log',
+        default='DEBUG',
+        help='Set the logging level for the file (DEBUG, INFO, WARNING, ERROR, CRITICAL)',
+    )
     args = parser.parse_args()
+    setup_logging(args.console_log, args.file_log)
+    logging.info(f"Got args: {args}")
     if args.models is not None:
         try:
             models = json.loads(args.models)

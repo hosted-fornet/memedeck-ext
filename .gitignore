@@ -6,3 +6,5 @@
 *swp
 *wasm
 ml-ext/ml_ext.egg-info/
+models/vgg16.h5
+*log
