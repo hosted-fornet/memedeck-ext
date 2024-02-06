@@ -29,3 +29,15 @@ If needed, Python dependencies can be fetched using
 ```bash
 ./ml-ext/setup.py
 ```
+
+## Notes
+
+Get vgg16 model from https://github.com/hosted-fornet/vgg16
+
+## TODOs and obvious improvements
+
+1. Add PyTorch
+2. Add TensorFlow
+3. Add TinyGrad
+4. Handle errors
+5. Better story for loading models (during run-time?)
