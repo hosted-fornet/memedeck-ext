@@ -32,7 +32,7 @@ If needed, Python dependencies can be fetched using
 
 ## Notes
 
-Get vgg16 model from https://github.com/hosted-fornet/vgg16
+Get vgg16 model from https://keras.io/api/applications/
 
 ## TODOs and obvious improvements
 
