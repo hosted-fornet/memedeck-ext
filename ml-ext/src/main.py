@@ -2,6 +2,7 @@
 
 import argparse
 import io
+import json
 import os
 import tempfile
 
@@ -125,28 +126,41 @@ def load_model_from_bytes_tf(model_bytes):
     return model
 
 
-def load_model_from_bytes_keras(model_bytes):
+def load_model_keras(model, models):
     """
-    Load a TensorFlow Keras model from bytes.
+    Load a TensorFlow Keras model.
 
     :param model_bytes: Bytes of the serialized TensorFlow SavedModel.
     :return: Loaded TensorFlow model.
     """
-    # Create a temporary directory to write the model bytes
-    temp_dir = tempfile.mkdtemp()
-    model_path = os.path.join(temp_dir, 'saved_model')
+    model_bytes = model.get("Bytes")
+    if model_bytes is not None:
+        # Create a temporary directory to write the model bytes
+        temp_dir = tempfile.mkdtemp()
+        model_path = os.path.join(temp_dir, 'saved_model')
 
-    # Write the model bytes to the directory
-    with open(model_path, 'wb') as file:
-        file.write(bytes(model_bytes))
+        # Write the model bytes to the directory
+        with open(model_path, 'wb') as file:
+            file.write(bytes(model_bytes))
 
-    # Load the model from the temporary directory
-    model = tf.keras.saving.load_model(model_path)
+        # Load the model from the temporary directory
+        model = tf.keras.saving.load_model(model_path)
 
-    # Cleanup the temporary directory if needed
-    # shutil.rmtree(temp_dir)
+        # Cleanup the temporary directory if needed
+        # shutil.rmtree(temp_dir)
 
-    return model
+        return model
+
+    model_name = model.get("Name")
+    if model_name is not None:
+        model_path = models.get(model_name)
+        if model_path is None:
+            raise Exception(f"no such model {model_name} amongst {models}")
+        model = tf.keras.saving.load_model(model_path)
+
+        return model
+
+    raise Exception(f"unexpected model type: {model}")
 
 
 def evaluate_model_tf(model, input_list):
@@ -230,17 +244,11 @@ REVERSE_KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP = {v: k for k, v in KINODE_ML_DATA
 REVERSE_KINODE_ML_DATA_TYPE_TO_NUMPY_MAP = {v: k for k, v in KINODE_ML_DATA_TYPE_TO_NUMPY_MAP.items()}
 
 
-def deserialize_kinode_ml_request(encoded_blob):
-    """Deserialize the blob into KinodeMlRequest structure."""
-    blob = msgpack.unpackb(bytes(encoded_blob), raw=False)
-    return blob
-
-
 def deserialize_message(encoded_message):
     """Deserialize MessagePack-encoded KinodeExtWSMessage to a Python dictionary."""
     message = msgpack.unpackb(encoded_message, raw=False)
     message = message["WebSocketExtPushData"]
-    message["blob"] = deserialize_kinode_ml_request(message["blob"])
+    message["blob"] = msgpack.unpackb(bytes(message["blob"]), raw=False)
     return message
 
 
@@ -274,6 +282,7 @@ def serialize_message(id, message_type, library, data_tensor):
     }
     return msgpack.packb(message, use_bin_type=True)
 
+
 def serialize_tensor_data_tf(tensors):
     dtype = REVERSE_KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[tensors[0].dtype]
     # Ensure all tensors are on CPU memory
@@ -297,17 +306,18 @@ def serialize_tensor_data_tf(tensors):
 
     return shape, dtype, bytes_data
 
+
 def deserialize_tensor_data_tf(bytes_list, shape, dtype):
     # Determine the numpy and TensorFlow data types from the mappings
     np_dtype = KINODE_ML_DATA_TYPE_TO_NUMPY_MAP[dtype]
     tf_dtype = KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[dtype]
 
     # Calculate the size of a single tensor's data in bytes
-    single_tensor_byte_size = np.product(shape) * np.dtype(np_dtype).itemsize
+    single_tensor_byte_size = np.prod(shape) * np.dtype(np_dtype).itemsize
 
     # Ensure the byte_list is divisible by the size of a single tensor
     if len(bytes_list) % single_tensor_byte_size != 0:
-        raise ValueError("byte_list size is not a multiple of shape product and dtype size")
+        raise ValueError(f"byte_list size ({len(bytes_list)}) is not a multiple of shape product and dtype size ({single_tensor_byte_size})")
 
     # Calculate how many tensors are represented by the byte_list
     num_tensors = len(bytes_list) // single_tensor_byte_size
@@ -316,14 +326,15 @@ def deserialize_tensor_data_tf(bytes_list, shape, dtype):
     full_array = np.frombuffer(bytes(bytes_list), dtype=np_dtype)
 
     # Split the array into multiple arrays, each representing a tensor, and convert each to a TensorFlow tensor
-    tensors = [tf.convert_to_tensor(full_array[i * np.product(shape):(i + 1) * np.product(shape)].reshape(shape), dtype=tf_dtype)
+    tensors = [tf.convert_to_tensor(full_array[i * np.prod(shape):(i + 1) * np.prod(shape)].reshape(shape), dtype=tf_dtype)
                for i in range(num_tensors)]
 
     return tensors
 
-async def run(port, process="ml:ml:sys"):
+
+async def run(port, models, process="ml:ml:sys"):
     uri = f"ws://localhost:{port}/{process}"
-    async with websockets.connect(uri, ping_interval=None) as websocket:
+    async with websockets.connect(uri, ping_interval=None, max_size=100 * 1024 * 1024) as websocket:
         while True:
             message = await websocket.recv()
             message = deserialize_message(message)
@@ -348,7 +359,7 @@ async def run(port, process="ml:ml:sys"):
                 # pass
             elif request["library"] == "Keras":
                 # load model
-                model = load_model_from_bytes_keras(request["model_bytes"])
+                model = load_model_keras(request["model"], models)
                 # load data
                 dtype = KINODE_ML_DATA_TYPE_TO_TENSORFLOW_MAP[request["data_type"]]
                 request['data_bytes'] = deserialize_tensor_data_tf(
@@ -394,6 +405,19 @@ async def run(port, process="ml:ml:sys"):
             await websocket.send(response)
 
 
+def validate_paths(paths_dict):
+    """Validate if the paths exist, error out if not."""
+    invalid_paths = []
+    for name, path in paths_dict.items():
+        if not os.path.exists(path):
+            invalid_paths.append((name, path))
+
+    if invalid_paths:
+        for name, path in invalid_paths:
+            print(f"Error: The path for '{name}' does not exist: {path}")
+        exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Connect to a WebSocket server on a specified port.",
@@ -404,9 +428,24 @@ def main():
         help="Port number of the WebSocket server to connect to.",
         required=True,
     )
+    parser.add_argument(
+        "--models",
+        type=str,
+        help="JSON string with name and path pairs",
+        required=False,
+    )
     args = parser.parse_args()
+    if args.models is not None:
+        try:
+            models = json.loads(args.models)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON: {e}")
+            exit(1)
+    else:
+        models = {}
+    validate_paths(models)
 
-    asyncio.get_event_loop().run_until_complete(run(args.port))
+    asyncio.get_event_loop().run_until_complete(run(args.port, models))
 
 if __name__ == "__main__":
     main()

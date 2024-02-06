@@ -27,8 +27,14 @@ pub struct KinodeMlRequest {
     pub library: KinodeMlLibrary,
     pub data_shape: Vec<u64>,
     pub data_type: KinodeMlDataType,
-    pub model_bytes: Vec<u8>,
+    pub model: Model,
     pub data_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Model {
+    Bytes(Vec<u8>),
+    Name(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
