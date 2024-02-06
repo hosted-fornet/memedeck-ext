@@ -17,10 +17,11 @@ kit f -r ~/path/to/kinode
 kit bs ml
 
 # Terminal 3: build & start python-ext
-./ml-ext/src/main.py --port 8080
+./ml-ext/src/main.py --port 8080 --models '{"mnist": "models/TFKeras.h5"}'
 
-# Run a model
-# TODO
+# Run a model (from Kinode terminal)
+mnist:ml:sys
+mnist_preloaded:ml:sys
 ```
 
 If needed, Python dependencies can be fetched using
