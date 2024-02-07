@@ -39,5 +39,4 @@ Get vgg16 model from https://keras.io/api/applications/
 1. Add PyTorch
 2. Add TensorFlow
 3. Add TinyGrad
-4. Handle errors
-5. Better story for loading models (during run-time?)
+4. Better story for loading models (during run-time?)
