@@ -60,16 +60,6 @@ fn handle_ws_message(
                         .inherit(true)
                         .send()?;
                 }
-                http::WsMessageType::Ping => {
-                    let _ = Request::new()
-                        .target("our@http_server:distro:sys".parse::<Address>()?)
-                        .body(serde_json::to_vec(&http::HttpServerAction::WebSocketPush {
-                            channel_id: *channel_id,
-                            message_type: http::WsMessageType::Pong,
-                        })?)
-                        .inherit(true)
-                        .send_and_await_response(5)?;
-                }
                 http::WsMessageType::Close => {
                     *connection = None;
                 }
