@@ -35,6 +35,11 @@ fn get_providers() -> anyhow::Result<Vec<String>> {
     Ok(vec!["fake2.os".into(), "fake3.os".into()])
 }
 
+fn is_willing() -> anyhow::Result<bool> {
+    // TODO: make this real
+    Ok(true)
+}
+
 fn ping_provider(provider_address: &Address) -> anyhow::Result<bool> {
     let response = Request::to(provider_address)
         .body(serde_json::to_vec(&MlRequest::Ping)?)
@@ -132,8 +137,10 @@ fn handle_message(
                 }
             }
             Ok(MlRequest::Ping) => {
+                let is_able = connection.is_some();
+                let is_willing = is_willing()?;
                 Response::new()
-                    .body(serde_json::to_vec(&MlResponse::Ping(connection.is_some()))?)
+                    .body(serde_json::to_vec(&MlResponse::Ping(is_able && is_willing))?)
                     .inherit(true)
                     .send()?;
                 return Ok(());
