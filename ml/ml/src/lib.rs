@@ -32,7 +32,7 @@ fn is_expected_channel_id(
 
 fn get_providers() -> anyhow::Result<Vec<String>> {
     // TODO: make this real
-    Ok(vec!["fake2.os".into()])
+    Ok(vec!["fake2.os".into(), "fake3.os".into()])
 }
 
 fn ping_provider(provider_address: &Address) -> anyhow::Result<bool> {
