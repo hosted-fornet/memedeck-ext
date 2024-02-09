@@ -253,7 +253,7 @@ REVERSE_KINODE_ML_DATA_TYPE_TO_NUMPY_MAP = {v: k for k, v in KINODE_ML_DATA_TYPE
 
 
 def deserialize_message(encoded_message):
-    """Deserialize MessagePack-encoded KinodeExtWSMessage to a Python dictionary."""
+    """Deserialize MessagePack-encoded WebSocketExtPushdata to a Python dictionary."""
     message = msgpack.unpackb(encoded_message, raw=False)
     message = message["WebSocketExtPushData"]
     message["blob"] = msgpack.unpackb(bytes(message["blob"]), raw=False)
@@ -261,7 +261,7 @@ def deserialize_message(encoded_message):
 
 
 def serialize_kinode_ml_response(library, data_tensor):
-    """Serialize KinodeMlResponse structure to MessagePack bytes."""
+    """Serialize MlResponsePayload structure to MessagePack bytes."""
     if library == "PyTorch":
         pass
     elif library == "TensorFlow":

@@ -5,6 +5,7 @@ use kinode_process_lib::{
 };
 
 mod ml_types;
+use ml_types::{MlRequest, MlResponse};
 
 wit_bindgen::generate!({
     path: "wit",
@@ -34,16 +35,21 @@ fn get_providers() -> anyhow::Result<Vec<String>> {
     Ok(vec!["fake2.os".into()])
 }
 
-fn ping_provider(provider: &str, our: &Address) -> anyhow::Result<bool> {
-    // TODO: make this real
-    Ok(true)
+fn ping_provider(provider_address: &Address) -> anyhow::Result<bool> {
+    let response = Request::to(provider_address)
+        .body(serde_json::to_vec(&MlRequest::Ping)?)
+        .send_and_await_response(1)??;
+    let MlResponse::Ping(is_provider) = serde_json::from_slice(response.body())? else {
+        return Err(anyhow::anyhow!("expected Ping as Response to Ping, got {:?}", response));
+    };
+    Ok(is_provider)
 }
 
 fn handle_ws_message(
     connection: &mut Option<Connection>,
-    message: Message,
+    message_body: &[u8],
 ) -> anyhow::Result<()> {
-    match serde_json::from_slice::<http::HttpServerRequest>(message.body())? {
+    match serde_json::from_slice::<http::HttpServerRequest>(message_body)? {
         http::HttpServerRequest::Http(_) => {
             // TODO: response?
             return Err(anyhow::anyhow!("b"));
@@ -66,7 +72,7 @@ fn handle_ws_message(
             match message_type {
                 http::WsMessageType::Binary => {
                     Response::new()
-                        .body(serde_json::to_vec(&serde_json::json!("Run"))?)
+                        .body(serde_json::to_vec(&MlResponse::Run)?)
                         .inherit(true)
                         .send()?;
                 }
@@ -89,49 +95,68 @@ fn handle_message(
 ) -> anyhow::Result<()> {
     let message = await_message()?;
 
-    if serde_json::json!("Run") != serde_json::from_slice::<serde_json::Value>(message.body())? {
-        handle_ws_message(connection, message)?;
-    } else {
-        if message.is_request() {
-            if let Some(Connection { channel_id }) = connection {
-                Request::to("our@http_server:distro:sys".parse::<Address>()?)
-                    .body(serde_json::to_vec(&http::HttpServerAction::WebSocketExtPushOutgoing {
-                        channel_id: *channel_id,
-                        message_type: http::WsMessageType::Binary,
-                        desired_reply_type: MessageType::Response,
-                    })?)
-                    .expects_response(15)
+    if message.is_request() {
+        match serde_json::from_slice(message.body()) {
+            Ok(MlRequest::Run) => {
+                if let Some(Connection { channel_id }) = connection {
+                    Request::to("our@http_server:distro:sys".parse::<Address>()?)
+                        .body(serde_json::to_vec(&http::HttpServerAction::WebSocketExtPushOutgoing {
+                            channel_id: *channel_id,
+                            message_type: http::WsMessageType::Binary,
+                            desired_reply_type: MessageType::Response,
+                        })?)
+                        .expects_response(15)
+                        .inherit(true)
+                        .send()?;
+                    return Ok(());
+                };
+                // Read in blob since pinging providers will clear it (new messages overwrite).
+                let Some(blob) = get_blob() else {
+                    // No blob -> no message.
+                    return Ok(());
+                };
+                let body = message.body();
+
+                let providers = get_providers()?;
+                for provider in providers {
+                    let provider_address = Address::new(provider, our.process.clone());
+                    if ping_provider(&provider_address).is_ok_and(|is_live| is_live) {
+                        Request::to(&provider_address)
+                            .body(body)
+                            .blob(blob)
+                            .expects_response(15)
+                            .send()?;
+
+                        return Ok(());
+                    }
+                }
+            }
+            Ok(MlRequest::Ping) => {
+                Response::new()
+                    .body(serde_json::to_vec(&MlResponse::Ping(connection.is_some()))?)
                     .inherit(true)
                     .send()?;
                 return Ok(());
-            };
-            // Read in blob since pinging providers will clear it (new messages overwrite).
-            let Some(blob) = get_blob() else {
-                // No blob -> no message.
-                return Ok(());
-            };
-            let body = message.body();
-
-            let providers = get_providers()?;
-            for provider in providers {
-                if ping_provider(&provider, our).is_ok_and(|is_live| is_live) {
-                    let provider_address = Address::new(provider, our.process.clone());
-                    Request::to(provider_address)
-                        .body(body)
-                        .blob(blob)
-                        .expects_response(15)
-                        .send()?;
-
-                    return Ok(());
-                }
             }
-        } else {
-            Response::new()
-                .body(serde_json::to_vec(&serde_json::json!("Run"))?)
-                .inherit(true)
-                .send()?;
+            Err(_) => {}
+        }
+    } else {
+        match serde_json::from_slice(message.body()) {
+            Ok(MlResponse::Run) => {
+                Response::new()
+                    .body(serde_json::to_vec(&MlResponse::Run)?)
+                    .inherit(true)
+                    .send()?;
+                return Ok(());
+            }
+            Ok(MlResponse::Ping(_)) => {
+                return Err(anyhow::anyhow!("unexpected Ping Response"));
+            }
+            Err(_) => {}
         }
     }
+
+    handle_ws_message(connection, message.body())?;
 
     Ok(())
 }

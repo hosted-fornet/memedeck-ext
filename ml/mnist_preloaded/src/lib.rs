@@ -1,7 +1,7 @@
 use kinode_process_lib::{call_init, get_blob, println, Address, LazyLoadBlob, Request};
 
 mod ml_types;
-use ml_types::{KinodeMlLibrary, KinodeMlDataType, KinodeMlRequest, KinodeMlResponse, Model};
+use ml_types::{MlLibrary, MlDataType, MlRequestPayload, MlResponsePayload, Model};
 
 wit_bindgen::generate!({
     path: "wit",
@@ -31,10 +31,10 @@ fn init(_our: Address) {
         .body(serde_json::to_vec(&serde_json::json!("Run")).unwrap())
         .blob(LazyLoadBlob {
             mime: None,
-            bytes: rmp_serde::to_vec_named(&KinodeMlRequest {
-                library: KinodeMlLibrary::Keras,
+            bytes: rmp_serde::to_vec_named(&MlRequestPayload {
+                library: MlLibrary::Keras,
                 data_shape: vec![1, 784],
-                data_type: KinodeMlDataType::Float32,
+                data_type: MlDataType::Float32,
                 model: Model::Name("mnist".to_string()),
                 data_bytes: input,
             }).unwrap(),
@@ -45,7 +45,7 @@ fn init(_our: Address) {
     let Some(LazyLoadBlob { ref bytes, .. }) = get_blob() else {
         panic!("a");
     };
-    let KinodeMlResponse { library, data_shape, data_type, data_bytes } = rmp_serde::from_slice(bytes).unwrap() else {
+    let MlResponsePayload { library, data_shape, data_type, data_bytes } = rmp_serde::from_slice(bytes).unwrap() else {
         panic!("b");
     };
     let output: Vec<f32> = data_bytes.chunks(4)
