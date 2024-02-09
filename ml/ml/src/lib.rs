@@ -103,6 +103,10 @@ fn handle_message(
     if message.is_request() {
         match serde_json::from_slice(message.body()) {
             Ok(MlRequest::Run) => {
+                if !is_willing()? {
+                    // TODO: Response?
+                    return Ok(());
+                }
                 if let Some(Connection { channel_id }) = connection {
                     Request::to("our@http_server:distro:sys".parse::<Address>()?)
                         .body(serde_json::to_vec(&http::HttpServerAction::WebSocketExtPushOutgoing {
