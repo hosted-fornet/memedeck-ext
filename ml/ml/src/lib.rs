@@ -1,7 +1,7 @@
 use kinode_process_lib::http;
 use kinode_process_lib::kernel_types::MessageType;
 use kinode_process_lib::{
-    await_message, call_init, get_blob, println, Address, LazyLoadBlob, Message, Request, Response,
+    await_message, call_init, get_blob, println, Address, Request, Response,
 };
 
 mod ml_types;
