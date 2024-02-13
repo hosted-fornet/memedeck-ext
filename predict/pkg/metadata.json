@@ -1,6 +1,6 @@
 {
-    "package": "ml",
-    "publisher": "sys",
+    "package": "memedeck",
+    "publisher": "holium.os",
     "version": [
         0,
         1,

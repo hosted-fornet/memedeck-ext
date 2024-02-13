@@ -4,8 +4,8 @@ use kinode_process_lib::{
     await_message, call_init, get_blob, println, Address, Request, Response,
 };
 
-mod ml_types;
-use ml_types::{MlRequest, MlResponse};
+mod predict_types;
+use predict_types::{PredictRequest, PredictResponse};
 
 wit_bindgen::generate!({
     path: "wit",
@@ -42,9 +42,9 @@ fn is_willing() -> anyhow::Result<bool> {
 
 fn ping_provider(provider_address: &Address) -> anyhow::Result<bool> {
     let response = Request::to(provider_address)
-        .body(serde_json::to_vec(&MlRequest::Ping)?)
+        .body(serde_json::to_vec(&PredictRequest::Ping)?)
         .send_and_await_response(1)??;
-    let MlResponse::Ping(is_provider) = serde_json::from_slice(response.body())? else {
+    let PredictResponse::Ping(is_provider) = serde_json::from_slice(response.body())? else {
         return Err(anyhow::anyhow!("expected Ping as Response to Ping, got {:?}", response));
     };
     Ok(is_provider)
@@ -77,7 +77,7 @@ fn handle_ws_message(
             match message_type {
                 http::WsMessageType::Binary => {
                     Response::new()
-                        .body(serde_json::to_vec(&MlResponse::Run)?)
+                        .body(serde_json::to_vec(&PredictResponse::Run)?)
                         .inherit(true)
                         .send()?;
                 }
@@ -102,7 +102,7 @@ fn handle_message(
 
     if message.is_request() {
         match serde_json::from_slice(message.body()) {
-            Ok(MlRequest::Run) => {
+            Ok(PredictRequest::Run) => {
                 if !is_willing()? {
                     // TODO: Response?
                     return Ok(());
@@ -140,11 +140,11 @@ fn handle_message(
                     }
                 }
             }
-            Ok(MlRequest::Ping) => {
+            Ok(PredictRequest::Ping) => {
                 let is_able = connection.is_some();
                 let is_willing = is_willing()?;
                 Response::new()
-                    .body(serde_json::to_vec(&MlResponse::Ping(is_able && is_willing))?)
+                    .body(serde_json::to_vec(&PredictResponse::Ping(is_able && is_willing))?)
                     .inherit(true)
                     .send()?;
                 return Ok(());
@@ -153,14 +153,14 @@ fn handle_message(
         }
     } else {
         match serde_json::from_slice(message.body()) {
-            Ok(MlResponse::Run) => {
+            Ok(PredictResponse::Run) => {
                 Response::new()
-                    .body(serde_json::to_vec(&MlResponse::Run)?)
+                    .body(serde_json::to_vec(&PredictResponse::Run)?)
                     .inherit(true)
                     .send()?;
                 return Ok(());
             }
-            Ok(MlResponse::Ping(_)) => {
+            Ok(PredictResponse::Ping(_)) => {
                 return Err(anyhow::anyhow!("unexpected Ping Response"));
             }
             Err(_) => {}
