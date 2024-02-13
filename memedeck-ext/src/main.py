@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import pickle
+import time
 
 import asyncio
 import msgpack
@@ -19,7 +20,7 @@ from keras.applications.vgg16 import preprocess_input
 from keras.models import load_model
 
 
-def predict_template(image, kmeans_path, pca_path, cluster_to_template_ids_path, vgg16_path):
+def predict_template(image, kmeans_model, pca_model, cluster_to_template_ids, vgg16_model):
     """
     This function takes the path of the image, kmeans model, pca model, cluster_to_template_ids dictionary and vgg16 model
     and returns the top 3 meme template ids with their probabilities as a json string.
@@ -31,11 +32,8 @@ def predict_template(image, kmeans_path, pca_path, cluster_to_template_ids_path,
         cluster_to_template_ids_path (str): The path of the cluster_to_template_ids dictionary
         vgg16_path (str): The path of the vgg16 model
     """
-    kmeans_model = pickle.load(open(kmeans_path, 'rb'))
-    pca_model = pickle.load(open(pca_path, 'rb'))
-    cluster_to_template_ids = pickle.load(open(cluster_to_template_ids_path, 'rb'))
-    model = load_model(vgg16_path)
-
+    times = {}
+    start = time.time()
     # load the meme image
     image_path = "/tmp/image"
     with open(image_path, "wb") as file:
@@ -44,11 +42,17 @@ def predict_template(image, kmeans_path, pca_path, cluster_to_template_ids_path,
     image = np.array(image)
     image = image.reshape(1,224,224,3)
     image = preprocess_input(image)
+    times["load"] = time.time() - start
 
+    start = time.time()
     # get the features
-    feature = model.predict(image, use_multiprocessing=True, verbose=0)
+    feature = vgg16_model.predict(image, use_multiprocessing=True, verbose=0)
+    times["vgg16"] = time.time() - start
+    start = time.time()
     feature = pca_model.transform(feature)
+    times["pca"] = time.time() - start
 
+    start = time.time()
     # predict the cluster
     prediction = kmeans_model.predict(feature)
     # get the cluster centers
@@ -60,6 +64,8 @@ def predict_template(image, kmeans_path, pca_path, cluster_to_template_ids_path,
     probabilities = (max_distance - distances) / max_distance
     # get the probabilities
     probabilities = list(probabilities[0])
+    times["kmeans"] = time.time() - start
+    start = time.time()
     # get the template_ids
     template_ids = list(cluster_to_template_ids[prediction[0]])
     # get the probabilities with template_ids
@@ -67,9 +73,11 @@ def predict_template(image, kmeans_path, pca_path, cluster_to_template_ids_path,
     # sort the probabilities
     probabilities_with_template_ids.sort(key=lambda x: x[1], reverse=True)
     # return the top 3 template_ids
-    print(probabilities_with_template_ids)
+    logging.info(f"Probabilities: {probabilities_with_template_ids}")
     prob_json = [{'template': template_id, 'prob': prob} for template_id, prob in probabilities_with_template_ids[:3]]
     # return as json string with json.dumps
+    times["rest"] = time.time() - start
+    logging.debug(f"run time of each predict step: {times}")
     return json.dumps(prob_json, indent=2)
 
 
@@ -93,6 +101,11 @@ def deserialize_message(encoded_message):
 
 
 async def run(port, kmeans_path, pca_path, cluster_to_template_ids_path, vgg16_path, process="predict:memedeck:holium.os"):
+    kmeans_model = pickle.load(open(kmeans_path, 'rb'))
+    pca_model = pickle.load(open(pca_path, 'rb'))
+    cluster_to_template_ids = pickle.load(open(cluster_to_template_ids_path, 'rb'))
+    vgg16_model = load_model(vgg16_path)
+
     uri = f"ws://localhost:{port}/{process}"
     async with websockets.connect(uri, ping_interval=None, max_size=100 * 1024 * 1024) as websocket:
         while True:
@@ -104,10 +117,10 @@ async def run(port, kmeans_path, pca_path, cluster_to_template_ids_path, vgg16_p
 
                 result = predict_template(
                     image,
-                    kmeans_path,
-                    pca_path,
-                    cluster_to_template_ids_path,
-                    vgg16_path,
+                    kmeans_model,
+                    pca_model,
+                    cluster_to_template_ids,
+                    vgg16_model,
                 )
                 response = serialize_message(
                     message["id"],
