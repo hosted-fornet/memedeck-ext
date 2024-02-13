@@ -1,12 +1,12 @@
-# kinode-ml
+# memedeck-ext
 
-The Kinode ml-ext and ml process.
+The Kinode memedect-ext and predict process.
 
 ## Usage
 
 ORDER MATTERS
 
-ml process MUST be started before ml-ext
+predict process MUST be started before memedeck-ext
 
 ```bash
 # Terminal 1: run Kinode
@@ -14,29 +14,22 @@ ml process MUST be started before ml-ext
 kit f -r ~/path/to/kinode
 
 # Terminal 2: build & start ml process
-kit bs ml
+kit bs predict
 
 # Terminal 3: build & start python-ext
-./ml-ext/src/main.py --port 8080 --models '{"mnist": "models/TFKeras.h5"}'
+./memedeck-ext/src/main.py --port 8082 --kmeans ~/scripts/models/kmeans_model_500_4.bin --pca ~/scripts/models/pca_model_500_4.bin --cluster-to-template-ids ~/scripts/models/cluster_to_template_ids.bin --vgg16 ~/scripts/models/vgg16_2.keras
 
-# Run a model (from Kinode terminal)
-mnist:ml:sys
-mnist_preloaded:ml:sys
+# Run memedeck
 ```
 
 If needed, Python dependencies can be fetched using
 
 ```bash
-./ml-ext/setup.py
+./memedeck-ext/setup.py
 ```
 
 ## Notes
 
 Get vgg16 model from https://keras.io/api/applications/
 
-## TODOs and obvious improvements
-
-1. Add PyTorch
-2. Add TensorFlow
-3. Add TinyGrad
-4. Better story for loading models (during run-time?)
+or models in general from https://github.com/holium/memedeck/pull/13
